@@ -64,7 +64,7 @@ MetaBdData_Lineage2 = MetaBdData_Lineage  %>%
   mutate(Endemic.ndead.cor = if_else(Endemic.ndead < 0, 0, Endemic.ndead))
 
 ## calculating the risk ratios from the raw # individuals data
-Lineage_RR_data = metafor::escalc(measure="RR", ai=Pandemic.ndead, bi=Pandemic.nlive, ci=Endemic.ndead.cor, di=Endemic.nlive, data=MetaBdData_Lineage2)
+Lineage_RR_data = metafor::escalc(measure="RR", ai=Pandemic.ndead, bi=Pandemic.nlive, ci=Endemic.ndead.cor, di=Endemic.nlive, data=MetaBdData_Lineage2, slab = paste(Study.Name))
 ## yi = log RR
 
 ## main model with a random term for study 
@@ -94,16 +94,17 @@ exp(coef(Lineage_basemod)[[1]])
 W <- diag(1/Lineage_RR_data$vi)
 X <- model.matrix(Lineage_basemod)
 P <- W - W %*% X %*% solve(t(X) %*% W %*% X) %*% t(X) %*% W
-100 * sum(Lineage_basemod$sigma2) / (sum(Lineage_basemod$sigma2) + (Lineage_basemod$k-Lineage_basemod$p)/sum(diag(P)))
+I2 = 100 * sum(Lineage_basemod$sigma2) / (sum(Lineage_basemod$sigma2) + (Lineage_basemod$k-Lineage_basemod$p)/sum(diag(P)))
+
+I2
+
 ```
 
 ## Plots 
 
-*still need to figure out best code for this...*
+*now using forest() because I finally digested the strange example code :-)*
 
-*not sure about error bars here yet...*
-
-```{r}
+```{r eval=FALSE, include=FALSE}
 
  Lineage_RR_data %>%
   ggplot(aes(x= Study.Name, y = exp(yi))) +
@@ -118,8 +119,52 @@ P <- W - W %*% X %*% solve(t(X) %*% W %*% X) %*% t(X) %*% W
 
 ```
 
+```{r}
+
+#res = model; dat = data
+
+forest(Lineage_basemod, atransf=exp, at=log(c(.05, .25, 1, 4)), xlim=c(-16,6), cex=.75, header="Study ID", mlab="")
+
+### add text with Q-value, dfs, p-value, and I^2 statistic
+text(-16, -1, pos=4, cex=0.75, bquote(paste("RE Model (Q = ",
+     .(formatC(Lineage_basemod$QE, digits=2, format="f")), ", df = ", .(Lineage_basemod$k - Lineage_basemod$p),
+     ", p = ", .(formatC(Lineage_basemod$QEp, digits=2, format="f")), "; ", I^2, " = ",
+     .(formatC(I2, digits=1, format="f")), "%)")))
+
+```
+
 **Conclusion:** Overall Risk Ratio Estimate:  2.29
 Mortality is consistently higher in the "experimental" group, i.e. in panzootic/GPL lineages
+
+
+**Mortality Plot**
+```{r}
+
+Lineage_RR_data_Mortality = Lineage_RR_data %>%
+  mutate(mortality.endemicCOR = mortality.endemic-Amount.mortality,mortality.pandemicCOR = mortality.pandemic-Amount.mortality)%>%
+  pivot_longer(cols = mortality.endemicCOR:mortality.pandemicCOR)%>%
+  filter(!name=="Nendemic") %>%
+  arrange(desc(mortality.pandemic))%>%
+  mutate(Corrected.Mortality = if_else(value < 0, 0, value))
+
+  
+#Lineage_RR_data_Mortality %>%
+ # ggplot(aes(x= Study.Name, y = value)) +
+  #geom_point(aes(color = name, alpha = .5)) +
+  #theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  #ylab("corrected Mortality (%)") +
+  #facet_wrap(~Historical.coexistence,scales = "free")
+
+
+Lineage_RR_data_Mortality %>%
+  ggplot(aes(fill=name, y=Corrected.Mortality, x=Study.Name)) + 
+    geom_bar(position="dodge", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab("corrected mortality (%)") +
+  facet_wrap(~Historical.coexistence,scales = "free")+
+  ggthemes::scale_fill_colorblind()
+
+```
 
 ## Detecting Outliers
 
@@ -128,7 +173,6 @@ Mortality is consistently higher in the "experimental" group, i.e. in panzootic/
 Lineage_CD = cooks.distance.rma.mv(Lineage_basemod)
 
 plot(Lineage_CD, type="o", pch=19, xlab="Observed Outcome", ylab="Cook's Distance")
-
 
 #influential = >1
 Lineage_dfB = dfbetas.rma.mv(Lineage_basemod)
@@ -151,9 +195,6 @@ Useful for interpretation: https://www.metafor-project.org/doku.php/tips:meta_re
 
 ```{r}
 
-Lineage_RR_data_noOL = Lineage_RR_data %>%
-  filter(!Study.Name== "Bufo bufoMallorcaCAPE(multi)-SpainGPL(multi)") 
-
 Lineage_basemod_noOL_Full = rma.mv(yi=yi, V=vi,data = Lineage_RR_data, random = ~1|Shortcitation, mods = ~ host.adult.ecology  + life.stage.exp + Historical.coexistence,slab = Lineage_RR_data$Study.Name, method = "REML")
 
 ## model results
@@ -172,6 +213,7 @@ anova(Lineage_basemodML,Lineage_basemod_FullML)
 ```
 
 **Conclusion** Full model is "better" than intercept only model 
+
 *random study term included in both*
 
 ### Single factor models
@@ -194,19 +236,22 @@ summary(Lineage_basemod_noOL_HEco)
 Conclusion: Significant, metamorph category
 
 ```{r}
-
-Lineage_basemod_noOL_LS = rma.mv(yi=yi, V=vi,data = Lineage_RR_data, random = ~1|Shortcitation, mods = ~ + life.stage.exp,slab = Lineage_RR_data$Study.Name, method = "REML")
+Lineage_RR_data2 = Lineage_RR_data %>%
+  arrange(life.stage.exp)
+Lineage_basemod_noOL_LS = rma.mv(yi=yi, V=vi,data = Lineage_RR_data2, random = ~1|Shortcitation, mods = ~ + life.stage.exp,slab = Lineage_RR_data2$Study.Name, method = "REML")
 
 ## model results
 summary(Lineage_basemod_noOL_LS)
 
 ```
 
-**Color-coded plot**
+**Sub-group Plot**
 
-```{r}
+*the formatting code for this is kind of ridiculous so still working on this....*
 
- Lineage_RR_data %>%
+```{r eval=FALSE, include=FALSE}
+
+ Lineage_RR_data2 %>%
   ggplot(aes(x= Study.Name, y = exp(yi))) +
   geom_hline(yintercept=1, size = 1, color = "black", alpha = 0.4) +
   geom_point(aes(color=life.stage.exp)) +
@@ -219,36 +264,62 @@ summary(Lineage_basemod_noOL_LS)
 
 ```
 
-**Historical Coexistence**
-
-Conclusion: Significant
-
 ```{r}
 
-Lineage_basemod_noOL_HisCo = rma.mv(yi=yi, V=vi,data = Lineage_RR_data, random = ~1|Shortcitation, mods = ~ Historical.coexistence,slab = Lineage_RR_data$Study.Name, method = "REML")
+### a little helper function to add Q-test, I^2, and tau^2 estimate info
+mlabfun <- function(text, Lineage_basemod_noOL_LS) {
+   list(bquote(paste(.(text),
+      " (Q = ", .(formatC(Lineage_basemod_noOL_LS$QE, digits=2, format="f")),
+      ", df = ", .(Lineage_basemod_noOL_LS$k - Lineage_basemod_noOL_LS$p),
+      ", p ", .(metafor:::.pval(Lineage_basemod_noOL_LS$QEp, digits=2, showeq=TRUE, sep=" ")))))}
+ 
+### set up forest plot (with 2x2 table counts added; the 'rows' argument is
+### used to specify in which rows the outcomes will be plotted)
+forest(Lineage_basemod_noOL_LS, xlim=c(-16, 10), at=log(c(0.05, 0.25, 1, 4)), atransf=exp,
+      cex=0.6, ylim=c(-1, 35),
+      rows=c(3:11,16:21,26:28),
+       mlab=mlabfun("RE Model for All Studies", Lineage_basemod_noOL_LS),
+       psize=1, header="Author(s) and Year")
+op <- par(cex=0.75, font=2)
+### add text for the subgroups
+text(-16, c(29,22,12), pos=4, c("Metamorph",
+                               "Larvae*",
+                               "Adult"))
+ 
+### set par back to the original settings
+par(op)
+ 
+### fit random-effects model in the three subgroups
+Lineage_basemod_noOL_LSa = rma.mv(yi=yi, V=vi,data = Lineage_RR_data, random = ~1|Shortcitation,slab = Lineage_RR_data$Study.Name, method = "REML",subset=(life.stage.exp=="adult"))
+Lineage_basemod_noOL_LSl = rma.mv(yi=yi, V=vi,data = Lineage_RR_data, random = ~1|Shortcitation,slab = Lineage_RR_data$Study.Name, method = "REML",subset=(life.stage.exp=="exposed as larvae, allowed to metamorphose"))
+Lineage_basemod_noOL_LSm = rma.mv(yi=yi, V=vi,data = Lineage_RR_data, random = ~1|Shortcitation,slab = Lineage_RR_data$Study.Name, method = "REML",subset=(life.stage.exp=="metamorph"))
+ 
+### add summary polygons for the three subgroups
+addpoly(Lineage_basemod_noOL_LSa, row=2, cex=0.75, atransf=exp, mlab=mlabfun("RE Model for Subgroup", Lineage_basemod_noOL_LSa))
+addpoly(Lineage_basemod_noOL_LSl, row= 15, cex=0.75, atransf=exp, mlab=mlabfun("RE Model for Subgroup", Lineage_basemod_noOL_LSl))
+addpoly(Lineage_basemod_noOL_LSm, row= 25, cex=0.75, atransf=exp, mlab=mlabfun("RE Model for Subgroup", Lineage_basemod_noOL_LSm))
+ 
+### add text for the test of subgroup differences
+text(-16, -1.8, pos=4, cex=0.75, bquote(paste("Test for Subgroup Differences: ",
+     Q[M], " = ", .(formatC(Lineage_basemod_noOL_LS$QM, digits=2, format="f")), ", df = ", .(Lineage_basemod_noOL_LS$p - 1),
+     ", p = ", .(formatC(Lineage_basemod_noOL_LS$QMp, digits=2, format="f")))))
+
+```
+
+
+**Historical Coexistence**
+
+Conclusion: **NOT** Significant
+
+```{r}
+Lineage_RR_data3 = Lineage_RR_data %>%
+  arrange(Historical.coexistence)
+Lineage_basemod_noOL_HisCo = rma.mv(yi=yi, V=vi,data = Lineage_RR_data3, random = ~1|Shortcitation, mods = ~ Historical.coexistence,slab = Lineage_RR_data3$Study.Name, method = "REML")
 
 ## model results
 summary(Lineage_basemod_noOL_HisCo)
 
 ```
-
-**Color-coded plot**
-
-```{r}
-
- Lineage_RR_data %>%
-  ggplot(aes(x= Study.Name, y = exp(yi))) +
-  geom_hline(yintercept=1, size = 1, color = "black", alpha = 0.4) +
-  geom_point(aes(color=Historical.coexistence)) +
-  #geom_errorbar(aes(ymin = exp(yi)-exp(vi), ymax = exp(yi)+exp(vi), alpha = 0.5), width = 0.2,show.legend = FALSE) + ## not sure about using vi here...???
-  theme_classic()+
-  scale_x_discrete()+
-  xlab("Study")+
-  ylab("Risk Ratio") +
-  coord_flip()
-
-```
-
 # **Location Hypothesis**
 
 ## Main model
@@ -275,6 +346,18 @@ Location_basemod = rma.mv(yi=yi, V=vi,data = Location_RR_data, random = ~1|Short
 summary(Location_basemod)
 ```
 
+**Overall all risk ratio**
+
+*estimate in model output is log RR*
+
+```{r}
+## converting log estimate to RR
+exp(coef(Location_basemod)[[1]])
+
+## https://www.metafor-project.org/doku.php/tips:meta_regression_with_log_rr
+
+```
+
 ## Heterogeneity: I^2
 
 ```{r}
@@ -282,16 +365,13 @@ summary(Location_basemod)
 W <- diag(1/Location_RR_data$vi)
 X <- model.matrix(Location_basemod)
 P <- W - W %*% X %*% solve(t(X) %*% W %*% X) %*% t(X) %*% W
-100 * sum(Location_basemod$sigma2) / (sum(Location_basemod$sigma2) + (Location_basemod$k-Location_basemod$p)/sum(diag(P)))
+I2loc = 100 * sum(Location_basemod$sigma2) / (sum(Location_basemod$sigma2) + (Location_basemod$k-Location_basemod$p)/sum(diag(P)))
+I2loc
 ```
 
 ## Plots
 
-*still need to figure out best code for this...*
-
-*not sure about error bars here...*
-
-```{r}
+```{r eval=FALSE, include=FALSE}
 Location_RR_data %>%
   ggplot(aes(x= Study.Name, y = exp(yi))) +
   geom_hline(yintercept=1, size = 1, color = "black", alpha = 0.4) +
@@ -304,6 +384,19 @@ Location_RR_data %>%
   coord_flip()
 ```
 
+```{r}
+
+#res = model; dat = data
+
+forest(Location_basemod, atransf=exp, at=log(c(.05, .25, 1, 4)), xlim=c(-16,6), cex=.75, header="Study ID", mlab="")
+
+### add text with Q-value, dfs, p-value, and I^2 statistic
+text(-16, -1, pos=4, cex=0.75, bquote(paste("RE Model (Q = ",
+     .(formatC(Location_basemod$QE, digits=2, format="f")), ", df = ", .(Location_basemod$k - Location_basemod$p),
+     ", p = ", .(formatC(Location_basemod$QEp, digits=2, format="f")), "; ", I^2, " = ",
+     .(formatC(I2loc, digits=1, format="f")), "%)")))
+
+```
 **Conclusion**: model not significant, no overarching effect in a given direction
 
 ## Outliers
@@ -334,6 +427,7 @@ Outliers: **3** Alytes muletensisTF5a1-UKTvB , Anaxyrus americanusJEL404-JEL423 
 Useful for interpretation: https://www.metafor-project.org/doku.php/tips:meta_regression_with_log_rr
 
 **multi-factor model**
+*now including the GPL-GPL vs other as a moderator*
 
 ```{r}
 
@@ -342,7 +436,7 @@ Location_RR_data_noOL = Location_RR_data %>%
   filter(!Study.Name== "Anaxyrus americanusJEL404-JEL423") %>%
   filter(!Study.Name== "Bufo bufo UKTvB-IA042")
 
-Location_basemod_Full = rma.mv(yi=yi, V=vi,data = Location_RR_data_noOL, random = ~1|Shortcitation, mods = ~ host.adult.ecology + life.stage.exp,slab = Location_RR_data_noOL$Study.Name, method = "REML")
+Location_basemod_Full = rma.mv(yi=yi, V=vi,data = Location_RR_data_noOL, random = ~1|Shortcitation, mods = ~ host.adult.ecology + life.stage.exp + Locatiion.GPLGPL,slab = Location_RR_data_noOL$Study.Name, method = "REML")
 
 ## model results
 summary(Location_basemod_Full)
@@ -351,10 +445,12 @@ summary(Location_basemod_Full)
 
 **model comparison**
 
+*random term base model to full moderator model*
+
 ```{r}
 Location_basemodML = rma.mv(yi=yi, V=vi,data = Location_RR_data_noOL, random = ~1|Shortcitation,slab = Location_RR_data_noOL$Study.Name, method = "ML")
 
-Location_basemod_FullML = rma.mv(yi=yi, V=vi,data = Location_RR_data_noOL, random = ~1|Shortcitation, mods = ~ host.adult.ecology  + life.stage.exp,slab = Location_RR_data_noOL$Study.Name, method = "ML")
+Location_basemod_FullML = rma.mv(yi=yi, V=vi,data = Location_RR_data_noOL, random = ~1|Shortcitation, mods = ~ host.adult.ecology  + life.stage.exp + Locatiion.GPLGPL,slab = Location_RR_data_noOL$Study.Name, method = "ML")
 
 ## says REML is not meaningful?  Switched to ML
 anova(Location_basemodML,Location_basemod_FullML)
@@ -362,6 +458,7 @@ anova(Location_basemodML,Location_basemod_FullML)
 
 **Conclusion** Full model is "NOT better" than intercept only model 
 *random study term included in both*
+
 
 **single factor models**
 
@@ -391,3 +488,111 @@ summary(Location_basemod_noOL_LS)
 
 ```
 
+**GPL-GPL Category**
+
+
+```{r}
+
+Location_basemod_noOL_GPLs = rma.mv(yi=yi, V=vi,data = Location_RR_data_noOL, mods = ~ + Locatiion.GPLGPL,random = ~1|Shortcitation, slab = Location_RR_data_noOL$Study.Name, method = "REML")
+
+## model results
+summary(Location_basemod_noOL_GPLs)
+
+```
+
+So, how do we interpret the coefficients from this model? (interpretation adapted from here:https://www.metafor-project.org/doku.php/tips:meta_regression_with_log_rr)
+
+the intercept is the estimated average log risk ratio for non-GPL.GPL group. So we can exponentiate the intercept to get the Risk Ratio and get the prediction intervals using predict()
+
+```{r}
+exp(coef(Location_basemod_noOL_GPLs)[[1]])
+
+predict(Location_basemod_noOL_GPLs, newmods=c(0,0), transf=exp, digits=2)
+```
+
+**Conclusion:** RR of the non-GPL.GPL group is 1.75?
+
+The other coefficients of the model reflect the difference in the (average) log risk ratio when comparing the GPL-GPL group to the non-GPL.GPL group. So if we want to know what the average risk ratio for GPL-GPL group was, we just add the second coefficient to the intercept and exponentiate the result....
+
+```{r}
+
+exp(coef(Location_basemod_noOL_GPLs)[[1]] + coef(Location_basemod_noOL_GPLs)[[2]])
+
+predict(Location_basemod_noOL_GPLs, newmods=c(1,0), transf=exp, digits=2)
+
+```
+
+**Conclusion:** RR of the GPL-GPL group is 0.60?
+
+**Plot for Location hypothesis coded by GPL-GPL category**
+
+```{r}
+Location_RR_data %>%
+  ggplot(aes(x= Study.Name, y = exp(yi))) +
+  geom_hline(yintercept=1, size = 1, color = "black", alpha = 0.4) +
+  geom_point(aes(color = Locatiion.GPLGPL)) +
+  #geom_errorbar(aes(ymin = exp(yi)-exp(vi), ymax = exp(yi)+exp(vi), alpha = 0.5), width = 0.2,show.legend = FALSE) + ## not sure about using vi here...???
+  theme_classic()+
+  scale_x_discrete()+
+  xlab("Study")+
+  ylab("Risk Ratio") +
+  coord_flip()
+```
+
+**I am confused about the above model for GPL-GPL category term.... in the rma.mv form above with the random study term, we can the opposite directionalities compared to running a rma model withOUT the random term (below), which makes more sense based on the plot....but I guess thats because of the added covariance structure of non-independent studies?**
+
+```{r eval=FALSE, include=FALSE}
+
+Location_basemod_GPLs_noRand = rma(yi=yi, vi=vi,data = Location_RR_data_noOL, mods = ~ + Locatiion.GPLGPL,slab = Location_RR_data_noOL$Study.Name, method = "REML")
+
+## model results
+summary(Location_basemod_GPLs_noRand)
+
+```
+
+## Perhaps the above is over complicating things and actually what we want to know is if we subset to just GPL-GPL, which is easier in terms of framing and interpretation (I think thats what I recall from last meeting? :) ), whether we see the same results... And the answer to that is yes.  RR for full data is 0.97 vs 1.02 for GPL-GPL only and model is not significant; moderators are also not significant.
+
+**model of GPL-GPL only**
+
+```{r}
+
+Location_RR_data_GPLs = Location_RR_data %>%
+  filter(Locatiion.GPLGPL== "Y")
+
+Location_basemod_GPLs = rma.mv(yi=yi, V=vi,data = Location_RR_data_GPLs, random = ~1|Shortcitation,slab = Location_RR_data_GPLs$Study.Name, method = "ML")
+
+## model results
+summary(Location_basemod_GPLs)
+
+```
+
+**Overall all risk ratio**
+
+*estimate in model output is log RR*
+
+```{r}
+## converting log estimate to RR
+exp(coef(Location_basemod_GPLs)[[1]])
+
+## https://www.metafor-project.org/doku.php/tips:meta_regression_with_log_rr
+
+```
+
+**multi-factor model for GPL-GPL only data**
+
+```{r}
+Location_basemod_GPLs_Full = rma.mv(yi=yi, V=vi,data = Location_RR_data_GPLs, random = ~1|Shortcitation,mods = ~ host.adult.ecology  + life.stage.exp, slab = Location_RR_data_GPLs$Study.Name, method = "ML")
+
+summary(Location_basemod_GPLs_Full)
+
+```
+
+
+**model comparison of GPL-GPL only data**
+
+```{r}
+anova(Location_basemod_GPLs,Location_basemod_GPLs_Full)
+```
+
+**Conclusion** Full model is "NOT better" than intercept only model 
+*random study term included in both*
