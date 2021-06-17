@@ -102,7 +102,7 @@ I2
 
 ## Plots 
 
-*now using forest() because I finally digested the strange example code :-)*
+*now trying to using forest() because I started digesting the strange example code :-)*
 
 ```{r eval=FALSE, include=FALSE}
 
@@ -123,7 +123,7 @@ I2
 
 #res = model; dat = data
 
-forest(Lineage_basemod, atransf=exp, at=log(c(.05, .25, 1, 4)), xlim=c(-16,6), cex=.75, header="Study ID", mlab="")
+forest(Lineage_basemod, atransf=exp, at=log(c(.05, .25, 1, 4,10,40)), xlim=c(-16,10), cex=.75, header="Study ID", mlab="")
 
 ### add text with Q-value, dfs, p-value, and I^2 statistic
 text(-16, -1, pos=4, cex=0.75, bquote(paste("RE Model (Q = ",
@@ -131,9 +131,10 @@ text(-16, -1, pos=4, cex=0.75, bquote(paste("RE Model (Q = ",
      ", p = ", .(formatC(Lineage_basemod$QEp, digits=2, format="f")), "; ", I^2, " = ",
      .(formatC(I2, digits=1, format="f")), "%)")))
 
+
 ```
 
-**Conclusion:** Overall Risk Ratio Estimate:  2.29
+**Conclusion:** Overall Risk Ratio Estimate:  2.31
 Mortality is consistently higher in the "experimental" group, i.e. in panzootic/GPL lineages
 
 
@@ -147,7 +148,6 @@ Lineage_RR_data_Mortality = Lineage_RR_data %>%
   arrange(desc(mortality.pandemic))%>%
   mutate(Corrected.Mortality = if_else(value < 0, 0, value))
 
-  
 #Lineage_RR_data_Mortality %>%
  # ggplot(aes(x= Study.Name, y = value)) +
   #geom_point(aes(color = name, alpha = .5)) +
@@ -159,6 +159,15 @@ Lineage_RR_data_Mortality = Lineage_RR_data %>%
 Lineage_RR_data_Mortality %>%
   ggplot(aes(fill=name, y=Corrected.Mortality, x=Study.Name)) + 
     geom_bar(position="dodge", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab("corrected mortality (%)") +
+  facet_wrap(~Historical.coexistence,scales = "free")+
+  ggthemes::scale_fill_colorblind()
+
+
+Lineage_RR_data_Mortality %>%
+  ggplot(aes(y=Corrected.Mortality, x=name, fill = name)) + 
+    geom_boxplot() +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   ylab("corrected mortality (%)") +
   facet_wrap(~Historical.coexistence,scales = "free")+
@@ -275,14 +284,14 @@ mlabfun <- function(text, Lineage_basemod_noOL_LS) {
  
 ### set up forest plot (with 2x2 table counts added; the 'rows' argument is
 ### used to specify in which rows the outcomes will be plotted)
-forest(Lineage_basemod_noOL_LS, xlim=c(-16, 10), at=log(c(0.05, 0.25, 1, 4)), atransf=exp,
-      cex=0.6, ylim=c(-1, 35),
-      rows=c(3:11,16:21,26:28),
+forest(Lineage_basemod_noOL_LS, xlim=c(-16, 10), at=log(c(0.05, 0.25, 1, 4,10)), atransf=exp,
+      cex=0.6, ylim=c(-1, 28),
+      rows=c(3:9,12:17,20:22),
        mlab=mlabfun("RE Model for All Studies", Lineage_basemod_noOL_LS),
-       psize=1, header="Author(s) and Year")
+       psize=1, header="Study ID")
 op <- par(cex=0.75, font=2)
 ### add text for the subgroups
-text(-16, c(29,22,12), pos=4, c("Metamorph",
+text(-16, c(23,18,10), pos=4, c("Metamorph",
                                "Larvae*",
                                "Adult"))
  
@@ -296,13 +305,58 @@ Lineage_basemod_noOL_LSm = rma.mv(yi=yi, V=vi,data = Lineage_RR_data, random = ~
  
 ### add summary polygons for the three subgroups
 addpoly(Lineage_basemod_noOL_LSa, row=2, cex=0.75, atransf=exp, mlab=mlabfun("RE Model for Subgroup", Lineage_basemod_noOL_LSa))
-addpoly(Lineage_basemod_noOL_LSl, row= 15, cex=0.75, atransf=exp, mlab=mlabfun("RE Model for Subgroup", Lineage_basemod_noOL_LSl))
-addpoly(Lineage_basemod_noOL_LSm, row= 25, cex=0.75, atransf=exp, mlab=mlabfun("RE Model for Subgroup", Lineage_basemod_noOL_LSm))
+addpoly(Lineage_basemod_noOL_LSl, row= 11, cex=0.75, atransf=exp, mlab=mlabfun("RE Model for Subgroup", Lineage_basemod_noOL_LSl))
+addpoly(Lineage_basemod_noOL_LSm, row= 19, cex=0.75, atransf=exp, mlab=mlabfun("RE Model for Subgroup", Lineage_basemod_noOL_LSm))
  
 ### add text for the test of subgroup differences
 text(-16, -1.8, pos=4, cex=0.75, bquote(paste("Test for Subgroup Differences: ",
      Q[M], " = ", .(formatC(Lineage_basemod_noOL_LS$QM, digits=2, format="f")), ", df = ", .(Lineage_basemod_noOL_LS$p - 1),
      ", p = ", .(formatC(Lineage_basemod_noOL_LS$QMp, digits=2, format="f")))))
+
+```
+
+**Effects for Sugroups**
+
+Risk Ratio for Adults
+
+```{r}
+exp(coef(Lineage_basemod_noOL_LS)[[1]])
+
+predict(Lineage_basemod_noOL_LS, newmods=c(0,0), transf=exp, digits=2)
+```
+
+Risk Ratio of Larvae*
+
+```{r}
+exp(coef(Lineage_basemod_noOL_LS)[[1]] + coef(Lineage_basemod_noOL_LS)[[2]])
+
+predict(Lineage_basemod_noOL_LS, newmods=c(1,0), transf=exp, digits=2)
+```
+
+How much greater is larval risk vs adult?
+
+```{r}
+exp(coef(Lineage_basemod_noOL_LS)[[2]])
+
+```
+
+Risk Ratio of Metamorph
+
+```{r}
+
+exp(coef(Lineage_basemod_noOL_LS)[[1]] + coef(Lineage_basemod_noOL_LS)[[3]])
+```
+
+How much greater is metamorph risk vs adult?
+
+```{r}
+exp(coef(Lineage_basemod_noOL_LS)[[3]])
+```
+
+How much greater is metamorph risk vs larvae?
+
+```{r}
+(exp(coef(Lineage_basemod_noOL_LS)[[1]] + coef(Lineage_basemod_noOL_LS)[[3]])) / (exp(coef(Lineage_basemod_noOL_LS)[[1]] + coef(Lineage_basemod_noOL_LS)[[2]]))
 
 ```
 
@@ -320,6 +374,7 @@ Lineage_basemod_noOL_HisCo = rma.mv(yi=yi, V=vi,data = Lineage_RR_data3, random 
 summary(Lineage_basemod_noOL_HisCo)
 
 ```
+
 # **Location Hypothesis**
 
 ## Main model
@@ -413,14 +468,14 @@ Location_dfB = dfbetas.rma.mv(Location_basemod)
 
 Location_dfB
 
-# Hat value outliers < 3*(1/k) == 3*(1/30) == 0.1 
+# Hat value outliers < 3*(1/k) == 3*(1/23) == 0.13 
 Location_Hat = hatvalues.rma.mv(Location_basemod)
 
 plot(Location_Hat, type="o", pch=19, xlab="Observed Outcome", ylab="Hat value")
   
 ```
 
-Outliers: **3** Alytes muletensisTF5a1-UKTvB , Anaxyrus americanusJEL404-JEL423 , Bufo bufo UKTvB-IA042
+Outliers: **1** Alytes muletensisTF5a1-UKTvB
 
 ## SubGroup/Moderator models
 
@@ -429,12 +484,12 @@ Useful for interpretation: https://www.metafor-project.org/doku.php/tips:meta_re
 **multi-factor model**
 *now including the GPL-GPL vs other as a moderator*
 
+<span style="color: red;"> With the updated data set host eco and life stage are "redundant predictors" in the full model </span>
+
 ```{r}
 
 Location_RR_data_noOL = Location_RR_data %>%
-  filter(!Study.Name== "Alytes muletensisTF5a1-UKTvB") %>%
-  filter(!Study.Name== "Anaxyrus americanusJEL404-JEL423") %>%
-  filter(!Study.Name== "Bufo bufo UKTvB-IA042")
+  filter(!Study.Name== "Alytes muletensisTF5a1-UKTvB")
 
 Location_basemod_Full = rma.mv(yi=yi, V=vi,data = Location_RR_data_noOL, random = ~1|Shortcitation, mods = ~ host.adult.ecology + life.stage.exp + Locatiion.GPLGPL,slab = Location_RR_data_noOL$Study.Name, method = "REML")
 
@@ -456,7 +511,7 @@ Location_basemod_FullML = rma.mv(yi=yi, V=vi,data = Location_RR_data_noOL, rando
 anova(Location_basemodML,Location_basemod_FullML)
 ```
 
-**Conclusion** Full model is "NOT better" than intercept only model 
+**Conclusion** Full model is "slightly better" than intercept only model based on AIC only
 *random study term included in both*
 
 
@@ -510,7 +565,7 @@ exp(coef(Location_basemod_noOL_GPLs)[[1]])
 predict(Location_basemod_noOL_GPLs, newmods=c(0,0), transf=exp, digits=2)
 ```
 
-**Conclusion:** RR of the non-GPL.GPL group is 1.75?
+**Conclusion:** RR of the non-GPL.GPL group is 0.49?
 
 The other coefficients of the model reflect the difference in the (average) log risk ratio when comparing the GPL-GPL group to the non-GPL.GPL group. So if we want to know what the average risk ratio for GPL-GPL group was, we just add the second coefficient to the intercept and exponentiate the result....
 
@@ -522,7 +577,7 @@ predict(Location_basemod_noOL_GPLs, newmods=c(1,0), transf=exp, digits=2)
 
 ```
 
-**Conclusion:** RR of the GPL-GPL group is 0.60?
+**Conclusion:** RR of the GPL-GPL group is 1.01?
 
 **Plot for Location hypothesis coded by GPL-GPL category**
 
@@ -539,7 +594,6 @@ Location_RR_data %>%
   coord_flip()
 ```
 
-**I am confused about the above model for GPL-GPL category term.... in the rma.mv form above with the random study term, we can the opposite directionalities compared to running a rma model withOUT the random term (below), which makes more sense based on the plot....but I guess thats because of the added covariance structure of non-independent studies?**
 
 ```{r eval=FALSE, include=FALSE}
 
@@ -550,7 +604,7 @@ summary(Location_basemod_GPLs_noRand)
 
 ```
 
-## Perhaps the above is over complicating things and actually what we want to know is if we subset to just GPL-GPL, which is easier in terms of framing and interpretation (I think thats what I recall from last meeting? :) ), whether we see the same results... And the answer to that is yes.  RR for full data is 0.97 vs 1.02 for GPL-GPL only and model is not significant; moderators are also not significant.
+<span style="color: red;"> Perhaps the above is over complicating things and actually what we want to know is if we subset to just GPL-GPL, which is easier in terms of framing and interpretation (I think thats what I recall from last meeting? :) ), whether we see the same results... And the answer to that is yes.  RR for full data is 1.04 and not significant vs 1.01 for GPL-GPL only and model is not significant (coded below) </span>
 
 **model of GPL-GPL only**
 
