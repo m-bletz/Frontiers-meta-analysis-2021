@@ -38,11 +38,11 @@ MetaBdData = read_tsv("Meta_Bd_Data_July18.txt") %>%
   filter(Inclusion=="Yes")
 
 MetaBdData_Genotype = MetaBdData %>%
-  filter(Genotype.Analysis=="Y")%>%
+  filter(HA.Analysis=="Y")%>%
   rename(mortality.endemic= mortality.local.or.endemic.Bd, Nendemic = n.local.or.endemic.Bd,Npandemic = n.nonlocal.or.pandemic.Bd, mortality.pandemic=mortality.nonlocal.or.pandemic.Bd)
 
 MetaBdData_Location = MetaBdData %>%
-  filter(Location.Analysis=="Y")%>%
+  filter(RA.Analysis=="Y")%>%
   rename(mortality.localBd= mortality.local.or.endemic.Bd, nlocalBd = n.local.or.endemic.Bd,nnonlocalBd = n.nonlocal.or.pandemic.Bd, mortality.nonlocalBd=mortality.nonlocal.or.pandemic.Bd)
 
 ```
@@ -57,8 +57,8 @@ MetaBdData_Location = MetaBdData %>%
 
 ## we need number of individuals data...recalculating percantages to numbers 
 MetaBdData_Genotype2 = MetaBdData_Genotype  %>%
-  mutate(Pandemic.ndead = round((mortality.pandemic-Amount.mortality)/100*Npandemic),
-         Endemic.ndead=round((mortality.endemic-Amount.mortality)/100*Nendemic)) %>%
+  mutate(Pandemic.ndead = round((mortality.pandemic-Amount.Cont.mortality)/100*Npandemic),
+         Endemic.ndead=round((mortality.endemic-Amount.Cont.mortality)/100*Nendemic)) %>%
   mutate(Pandemic.nlive = Npandemic-Pandemic.ndead,
          Endemic.nlive = Nendemic-Endemic.ndead) %>%
   mutate(Endemic.ndead.cor = if_else(Endemic.ndead < 0, 0, Endemic.ndead))
@@ -68,7 +68,7 @@ Genotype_RR_data = metafor::escalc(measure="RR", ai=Pandemic.ndead, bi=Pandemic.
 ## yi = log RR
 
 ## main model with a random term for study 
-Genotype_basemod = rma.mv(yi=yi, V=vi,data = Genotype_RR_data, random = ~1|Shortcitation, slab = Genotype_RR_data$Study.Name,method = "REML")
+Genotype_basemod = rma.mv(yi=yi, V=vi,data = Genotype_RR_data, random = ~1|Short.Citation, slab = Genotype_RR_data$Study.Name,method = "REML")
 
 ## model results
 summary(Genotype_basemod)
@@ -102,23 +102,6 @@ I2
 
 ## Plots 
 
-*now trying to using forest() because I started digesting the strange example code :-)*
-
-
-```{r eval=FALSE, include=FALSE}
-
- Genotype_RR_data %>%
-  ggplot(aes(x= Study.Name, y = exp(yi))) +
-  geom_hline(yintercept=1, size = 1, color = "black", alpha = 0.4) +
-  geom_point(aes()) +
-  geom_errorbar(aes(ymin = exp(yi)-exp(vi), ymax = exp(yi)+exp(vi), alpha = 0.5), width = 0.2,show.legend = FALSE) + ## not sure about using vi here...???
-  theme_classic()+
-  scale_x_discrete()+
-  xlab("Study")+
-  ylab("Risk Ratio") +
-  coord_flip()
-
-```
 
 ```{r}
 
@@ -143,7 +126,7 @@ Mortality is consistently higher in the "experimental" group, i.e. in panzootic/
 ```{r}
 
 Genotype_RR_data_Mortality = Genotype_RR_data %>%
-  mutate(mortality.endemicCOR = mortality.endemic-Amount.mortality,mortality.pandemicCOR = mortality.pandemic-Amount.mortality)%>%
+  mutate(mortality.endemicCOR = mortality.endemic-Amount.Cont.mortality,mortality.pandemicCOR = mortality.pandemic-Amount.Cont.mortality)%>%
   pivot_longer(cols = mortality.endemicCOR:mortality.pandemicCOR)%>%
   filter(!name=="Nendemic") %>%
   arrange(desc(mortality.pandemic))%>%
@@ -389,8 +372,8 @@ summary(Genotype_basemod_noOL_HisCo)
 
 ## we need number of individuals data...recalculating percantages to numbers 
 MetaBdData_Location2 = MetaBdData_Location %>%
-  mutate(nonLocal.ndead = round((mortality.nonlocalBd-Amount.mortality)/100*nnonlocalBd),
-         Local.ndead=round((mortality.localBd-Amount.mortality)/100*nlocalBd)) %>%
+  mutate(nonLocal.ndead = round((mortality.nonlocalBd-Amount.Cont.mortality)/100*nnonlocalBd),
+         Local.ndead=round((mortality.localBd-Amount.Cont.mortality)/100*nlocalBd)) %>%
   mutate(nonLocal.nlive = nnonlocalBd-nonLocal.ndead,Local.nlive = nlocalBd-Local.ndead) %>%
   mutate(Local.ndead.cor = if_else(Local.ndead < 0, 0, Local.ndead)) %>%
   mutate(nonLocal.ndead.cor = if_else(nonLocal.ndead < 0, 0, nonLocal.ndead))
@@ -400,9 +383,9 @@ Location_RR_data = metafor::escalc(measure="RR", ai=nonLocal.ndead.cor, bi=nonLo
 
 ## main model with a random term for study 
 Location_RR_data_GPLs = Location_RR_data %>%
-  filter(Location.GPLGPL== "Y")
+  filter(RA.Analysis== "Y")
 
-Location_basemod_GPLs = rma.mv(yi=yi, V=vi,data = Location_RR_data_GPLs, random = ~1|Shortcitation,slab = Location_RR_data_GPLs$Study.Name, method = "REML")
+Location_basemod_GPLs = rma.mv(yi=yi, V=vi,data = Location_RR_data_GPLs, random = ~1|Short.Citation,slab = Location_RR_data_GPLs$Study.Name, method = "REML")
 
 ## model results
 summary(Location_basemod_GPLs)
