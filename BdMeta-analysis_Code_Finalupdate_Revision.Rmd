@@ -1,0 +1,523 @@
+---
+title: "Meta-analysis-Bd-hypotheses"
+author: "Molly"
+date: "July 2021"
+output:
+  rmdformats::readthedown:
+    highlight: tango
+    code_folding: hide
+  html_document:
+    smart_extension: no
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    df_print: paged
+    code_folding: hide
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+# Setup & Data
+
+## **Packages**
+```{r}
+library(tidyverse)
+library(dmetar)
+library(meta)
+library(metafor)
+```
+
+## **Data Read-in**
+```{r}
+
+## FILTER OUT 0-0s!
+MetaBdData = read_tsv("Meta_Bd_Data_Final_Oct2021.txt") %>%
+  filter(Inclusion=="Yes")
+
+MetaBdData_Genotype = MetaBdData %>%
+  filter(HA.Analysis=="Y")%>%
+  rename(mortality.endemic= mortality.local.or.endemic.Bd, Nendemic = n.local.or.endemic.Bd,Npandemic = n.nonlocal.or.pandemic.Bd, mortality.pandemic=mortality.nonlocal.or.pandemic.Bd) %>%
+  arrange(PlotOrder)
+
+MetaBdData_Location = MetaBdData %>%
+  filter(RA.Analysis=="Y")%>%
+  rename(mortality.localBd= mortality.local.or.endemic.Bd, nlocalBd = n.local.or.endemic.Bd,nnonlocalBd = n.nonlocal.or.pandemic.Bd, mortality.nonlocalBd=mortality.nonlocal.or.pandemic.Bd) %>%
+  arrange(PlotOrder)
+
+```
+
+# **Historical Adaptation Hypothesis**
+
+## Main effect model
+
+```{r}
+
+## using event rate data
+
+## we need number of individuals data...recalculating percantages to numbers 
+MetaBdData_Genotype2 = MetaBdData_Genotype  %>%
+  mutate(Pandemic.ndead = round((mortality.pandemic-Amount.Cont.mortality)/100*Npandemic),
+         Endemic.ndead=round((mortality.endemic-Amount.Cont.mortality)/100*Nendemic)) %>%
+  mutate(Pandemic.nlive = Npandemic-Pandemic.ndead,
+         Endemic.nlive = Nendemic-Endemic.ndead) %>%
+  mutate(Endemic.ndead.cor = if_else(Endemic.ndead < 0, 0, Endemic.ndead))
+
+## calculating the risk ratios from the raw # individuals data
+Genotype_RR_data = metafor::escalc(measure="RR", ai=Pandemic.ndead, bi=Pandemic.nlive, ci=Endemic.ndead.cor, di=Endemic.nlive, data=MetaBdData_Genotype2, slab = paste(Study.Name))  %>%
+  arrange(PlotOrder)
+## yi = log RR
+
+Genotype_RR_data2 = Genotype_RR_data %>%
+  filter(HA.Analysis== "Y") %>%
+  arrange(PlotOrder)
+
+## main model with a random term for study 
+Genotype_basemod = rma.mv(yi=yi, V=vi,data = Genotype_RR_data2, random = ~1|Short.Citation, slab = Genotype_RR_data2$Study.Name,method = "REML")
+
+## model results
+summary(Genotype_basemod)
+
+```
+
+**Overall all risk ratio**
+
+*estimate in model output is log RR*
+
+```{r}
+## converting log estimate to RR
+exp(coef(Genotype_basemod)[[1]])
+
+## https://www.metafor-project.org/doku.php/tips:meta_regression_with_log_rr
+
+```
+
+## Heterogeneity: I^2
+
+```{r}
+# from metafor package site
+W <- diag(1/Genotype_RR_data2$vi)
+X <- model.matrix(Genotype_basemod)
+P <- W - W %*% X %*% solve(t(X) %*% W %*% X) %*% t(X) %*% W
+I2 = 100 * sum(Genotype_basemod$sigma2) / (sum(Genotype_basemod$sigma2) + (Genotype_basemod$k-Genotype_basemod$p)/sum(diag(P)))
+
+I2
+
+```
+
+## Plots 
+
+```{r}
+
+
+forest(Genotype_basemod, atransf = exp, at=log(c(.05, .25, 1, 4,10,55)), xlim=c(-12,10), cex=.75, header="Study ID", mlab="", efac = 2)
+
+### add text with Q-value, dfs, p-value, and I^2 statistic
+text(-12, -1, pos=4, cex=0.75, bquote(paste("REM (Q = ",
+     .(formatC(Genotype_basemod$QE, digits=2, format="f")), ", df = ", .(Genotype_basemod$k - Genotype_basemod$p),
+     ", p = ", .(formatC(Genotype_basemod$QEp, digits=2, format="f")), "; ", I^2, " = ",
+     .(formatC(I2, digits=1, format="f")), "%)")))
+
+
+```
+
+**Conclusion:** Overall Risk Ratio Estimate:  2.31
+Mortality is consistently higher in the "experimental" group, i.e. in panzootic/GPL Genotypes
+
+
+**Mortality Plot**
+
+```{r}
+
+Genotype_RR_data_Mortality = Genotype_RR_data %>%
+  mutate(mortality.endemicCOR = mortality.endemic-Amount.Cont.mortality,mortality.pandemicCOR = mortality.pandemic-Amount.Cont.mortality)%>%
+  pivot_longer(cols = mortality.endemicCOR:mortality.pandemicCOR)%>%
+  filter(!name=="Nendemic") %>%
+  arrange(desc(mortality.pandemic))%>%
+  mutate(Corrected.Mortality = if_else(value < 0, 0, value))
+
+#Genotype_RR_data_Mortality %>%
+ # ggplot(aes(x= Study.Name, y = value)) +
+  #geom_point(aes(color = name, alpha = .5)) +
+  #theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  #ylab("corrected Mortality (%)") +
+  #facet_wrap(~Historical.coexistence,scales = "free")
+
+
+Genotype_RR_data_Mortality %>%
+  ggplot(aes(fill=name, y=Corrected.Mortality, x=Study.Name)) + 
+    geom_bar(position="dodge", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab("corrected mortality (%)") +
+  facet_wrap(~Historical.coexistence,scales = "free")+
+  ggthemes::scale_fill_colorblind()
+
+
+Genotype_RR_data_Mortality %>%
+  ggplot(aes(y=Corrected.Mortality, x=name, fill = name)) + 
+    geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab("corrected mortality (%)") +
+  facet_wrap(~Historical.coexistence,scales = "free")+
+  ggthemes::scale_fill_colorblind()
+
+```
+
+**Comparison of Variances between Historical coexistence categories**
+
+**Conclusion**:  Not Significant
+
+```{r}
+Genotype_RR_data_Mortality_Pan = Genotype_RR_data_Mortality %>%
+  filter(name=="mortality.pandemicCOR")
+
+fligner.test(Corrected.Mortality ~ Historical.coexistence, data = Genotype_RR_data_Mortality_Pan)
+
+Genotype_RR_data_Mortality_End = Genotype_RR_data_Mortality %>%
+  filter(name=="mortality.endemicCOR")
+
+fligner.test(Corrected.Mortality ~ Historical.coexistence, data = Genotype_RR_data_Mortality_End)
+```
+
+## Detecting Outliers
+
+```{r}
+#influential > 0.45
+Genotype_CD = cooks.distance.rma.mv(Genotype_basemod)
+
+plot(Genotype_CD, type="o", pch=19, xlab="Observed Outcome", ylab="Cook's Distance")
+
+#influential = >1
+Genotype_dfB = dfbetas.rma.mv(Genotype_basemod)
+
+Genotype_dfB
+
+# Hat value outliers < 3*(1/k) == 3*(1/17) == 0.167  
+Genotype_Hat = hatvalues.rma.mv(Genotype_basemod)
+
+plot(Genotype_Hat, type="o", pch=19, xlab="Observed Outcome", ylab="Hat value")
+```
+
+**Outliers:** None
+
+## SubGroup/Moderator models
+
+Useful for interpretation: https://www.metafor-project.org/doku.php/tips:meta_regression_with_log_rr
+
+### Multi-factor model
+
+```{r}
+
+Genotype_basemod_noOL_Full = rma.mv(yi=yi, V=vi,data = Genotype_RR_data, random = ~1|Short.Citation, mods = ~ host.adult.ecology  + life.stage.exp + Historical.coexistence,slab = Genotype_RR_data$Study.Name, method = "REML")
+
+## model results
+summary(Genotype_basemod_noOL_Full)
+```
+
+**model comparison**
+
+```{r}
+Genotype_basemodML = rma.mv(yi=yi, V=vi,data = Genotype_RR_data, random = ~1|Short.Citation,slab = Genotype_RR_data$Study.Name, method = "ML")
+
+Genotype_basemod_FullML = rma.mv(yi=yi, V=vi,data = Genotype_RR_data, random = ~1|Short.Citation, mods = ~ host.adult.ecology  + life.stage.exp + Historical.coexistence,slab = Genotype_RR_data$Study.Name, method = "ML")
+
+## says REML is not meaningful?  Switched to ML
+anova(Genotype_basemodML,Genotype_basemod_FullML)
+```
+
+**Conclusion** Full model is "better" than intercept only model 
+
+*random study term included in both*
+
+### Single factor models
+
+**Host Ecology**
+
+Conclusion: Not Significant
+
+```{r}
+
+Genotype_basemod_noOL_HEco = rma.mv(yi=yi, V=vi,data = Genotype_RR_data, random = ~1|Short.Citation, mods = ~ host.adult.ecology, slab = Genotype_RR_data$Study.Name, method = "REML")
+
+## model results
+summary(Genotype_basemod_noOL_HEco)
+
+```
+
+**Life Stage**
+
+Conclusion: Significant, metamorph category
+
+```{r}
+Genotype_RR_data2 = Genotype_RR_data %>%
+  arrange(PlotOrder)
+
+Genotype_basemod_noOL_LS = rma.mv(yi=yi, V=vi,data = Genotype_RR_data2, random = ~1|Short.Citation, mods = ~ + life.stage.exp,slab = Genotype_RR_data2$Study.Name, method = "REML")
+
+## model results
+summary(Genotype_basemod_noOL_LS)
+
+```
+
+**Sub-group Plot**
+
+*the formatting code for this is kind of ridiculous so still working on this....*
+
+*edited inn illustrator for manuscript*
+
+
+```{r}
+
+### a little helper function to add Q-test, I^2, and tau^2 estimate info
+mlabfun <- function(text, Genotype_basemod_noOL_LS) {
+   list(bquote(paste(.(text),
+      " (Q = ", .(formatC(Genotype_basemod_noOL_LS$QE, digits=2, format="f")),
+      ", df = ", .(Genotype_basemod_noOL_LS$k - Genotype_basemod_noOL_LS$p),
+      ", p ", .(metafor:::.pval(Genotype_basemod_noOL_LS$QEp, digits=2, showeq=TRUE, sep=" ")))))}
+ 
+### set up forest plot (with 2x2 table counts added; the 'rows' argument is
+### used to specify in which rows the outcomes will be plotted)
+forest(Genotype_basemod_noOL_LS, xlim=c(-12, 10), at=log(c(0.05, 0.25, 1, 4,10,55)), atransf=exp,
+      cex=0.6, ylim=c(-1, 28),
+      rows=c(3:9,12:16,19:24),
+       mlab=mlabfun("RE Model for All Studies", Genotype_basemod_noOL_LS),
+       psize=1, header="Study ID")
+op <- par(cex=0.75, font=2)
+### add text for the subgroups
+text(-12, c(25,17,10), pos=4, c("Larvae*",
+                               "Metamorph",
+                               "Adult"))
+ 
+### set par back to the original settings
+par(op)
+ 
+### fit random-effects model in the three subgroups
+Genotype_basemod_noOL_LSa = rma.mv(yi=yi, V=vi,data = Genotype_RR_data, random = ~1|Short.Citation,slab = Genotype_RR_data$Study.Name, method = "REML",subset=(life.stage.exp=="adult"))
+Genotype_basemod_noOL_LSl = rma.mv(yi=yi, V=vi,data = Genotype_RR_data, random = ~1|Short.Citation,slab = Genotype_RR_data$Study.Name, method = "REML",subset=(life.stage.exp=="larvae"))
+Genotype_basemod_noOL_LSm = rma.mv(yi=yi, V=vi,data = Genotype_RR_data, random = ~1|Short.Citation,slab = Genotype_RR_data$Study.Name, method = "REML",subset=(life.stage.exp=="metamorph"))
+ 
+### add summary polygons for the three subgroups
+addpoly(Genotype_basemod_noOL_LSa, row=2, cex=0.6, atransf=exp, mlab=mlabfun("REM", Genotype_basemod_noOL_LSa))
+addpoly(Genotype_basemod_noOL_LSl, row= 18, cex=0.6, atransf=exp, mlab=mlabfun("REM", Genotype_basemod_noOL_LSl))
+addpoly(Genotype_basemod_noOL_LSm, row= 11, cex=0.6, atransf=exp, mlab=mlabfun("REM", Genotype_basemod_noOL_LSm))
+ 
+### add text for the test of subgroup differences
+text(-12, -1.8, pos=4, cex=0.6, bquote(paste("Test for Subgroup Differences: ",
+     Q[M], " = ", .(formatC(Genotype_basemod_noOL_LS$QM, digits=2, format="f")), ", df = ", .(Genotype_basemod_noOL_LS$p - 1),
+     ", p = ", .(formatC(Genotype_basemod_noOL_LS$QMp, digits=2, format="f")))))
+
+```
+
+**Effects for Subgroups**
+
+Risk Ratio for Adults
+
+```{r}
+exp(coef(Genotype_basemod_noOL_LS)[[1]])
+
+predict(Genotype_basemod_noOL_LS, newmods=c(0,0), transf=exp, digits=2)
+```
+
+Risk Ratio of Larvae*
+
+```{r}
+exp(coef(Genotype_basemod_noOL_LS)[[1]] + coef(Genotype_basemod_noOL_LS)[[2]])
+```
+
+How much greater is larval risk vs adult?
+
+```{r}
+exp(coef(Genotype_basemod_noOL_LS)[[2]])
+
+```
+
+Risk Ratio of Metamorph
+
+```{r}
+
+exp(coef(Genotype_basemod_noOL_LS)[[1]] + coef(Genotype_basemod_noOL_LS)[[3]])
+```
+
+How much greater is metamorph risk vs adult?
+
+```{r}
+exp(coef(Genotype_basemod_noOL_LS)[[3]])
+```
+
+How much greater is metamorph risk vs larvae?
+
+```{r}
+(exp(coef(Genotype_basemod_noOL_LS)[[1]] + coef(Genotype_basemod_noOL_LS)[[3]])) / (exp(coef(Genotype_basemod_noOL_LS)[[1]] + coef(Genotype_basemod_noOL_LS)[[2]]))
+
+```
+
+
+**Historical Coexistence**
+
+Conclusion: **NOT** Significant
+
+```{r}
+Genotype_RR_data3 = Genotype_RR_data %>%
+  arrange(Historical.coexistence)
+Genotype_basemod_noOL_HisCo = rma.mv(yi=yi, V=vi,data = Genotype_RR_data3, random = ~1|Short.Citation, mods = ~ Historical.coexistence,slab = Genotype_RR_data3$Study.Name, method = "REML")
+
+## model results
+summary(Genotype_basemod_noOL_HisCo)
+
+```
+
+
+# **Local Adaptation Hypothesis**
+
+## Main model
+
+```{r}
+
+## using event rate data
+
+## we need number of individuals data...recalculating percantages to numbers 
+MetaBdData_Location2 = MetaBdData_Location %>%
+  mutate(nonLocal.ndead = round((mortality.nonlocalBd-Amount.Cont.mortality)/100*nnonlocalBd),
+         Local.ndead=round((mortality.localBd-Amount.Cont.mortality)/100*nlocalBd)) %>%
+  mutate(nonLocal.nlive = nnonlocalBd-nonLocal.ndead,Local.nlive = nlocalBd-Local.ndead) %>%
+  mutate(Local.ndead.cor = if_else(Local.ndead < 0, 0, Local.ndead)) %>%
+  mutate(nonLocal.ndead.cor = if_else(nonLocal.ndead < 0, 0, nonLocal.ndead))
+
+## calculating the risk ratios from the raw # individuals data
+Location_RR_data = metafor::escalc(measure="RR", ai=nonLocal.ndead.cor, bi=nonLocal.nlive, ci=Local.ndead.cor, di=Local.nlive, data=MetaBdData_Location2)
+
+## main model with a random term for study 
+Location_RR_data_GPLs = Location_RR_data %>%
+  filter(RA.Analysis== "Y") %>%
+  arrange(PlotOrder)
+
+Location_basemod_GPLs = rma.mv(yi=yi, V=vi,data = Location_RR_data_GPLs, random = ~1|Short.Citation,slab = Location_RR_data_GPLs$Study.Name, method = "REML")
+
+## model results
+summary(Location_basemod_GPLs)
+
+```
+
+## Heterogeneity: I^2
+
+```{r}
+# from metafor package site
+W <- diag(1/Location_RR_data_GPLs$vi)
+X <- model.matrix(Location_basemod_GPLs)
+P <- W - W %*% X %*% solve(t(X) %*% W %*% X) %*% t(X) %*% W
+I2loc = 100 * sum(Location_basemod_GPLs$sigma2) / (sum(Location_basemod_GPLs$sigma2) + (Location_basemod_GPLs$k-Location_basemod_GPLs$p)/sum(diag(P)))
+I2loc
+```
+
+**Overall all risk ratio**
+
+*estimate in model output is log RR*
+
+```{r}
+## converting log estimate to RR
+exp(coef(Location_basemod_GPLs)[[1]])
+
+## https://www.metafor-project.org/doku.php/tips:meta_regression_with_log_rr
+
+```
+
+## Plots
+
+```{r}
+
+#res = model; dat = data
+
+forest(Location_basemod_GPLs, atransf=exp, at=log(c(.05, .25, 1, 4,10)), xlim=c(-16,10), cex=.75, header="Study ID", mlab="")
+
+### add text with Q-value, dfs, p-value, and I^2 statistic
+text(-16, -1, pos=4, cex=0.75, bquote(paste("RE Model (Q = ",
+     .(formatC(Location_basemod_GPLs$QE, digits=2, format="f")), ", df = ", .(Location_basemod_GPLs$k - Location_basemod_GPLs$p),
+     ", p = ", .(formatC(Location_basemod_GPLs$QEp, digits=2, format="f")), "; ", I^2, " = ",
+     .(formatC(I2loc, digits=1, format="f")), "%)")))
+
+```
+
+**Conclusion**: model not significant, no overarching effect in a given direction
+
+## Outliers
+
+```{r}
+Location_CD = cooks.distance.rma.mv(Location_basemod_GPLs)
+
+plot(Location_CD, type="o", pch=19, xlab="Observed Outcome", ylab="Cook's Distance")
+
+Location_CD %>% as.data.frame()
+
+#influential = >1
+Location_dfB = dfbetas.rma.mv(Location_basemod_GPLs)
+
+Location_dfB
+
+# Hat value outliers > 3*(1/k) == 3*(1/17) == 0.158 
+Location_Hat = hatvalues.rma.mv(Location_basemod_GPLs)
+
+plot(Location_Hat, type="o", pch=19, xlab="Observed Outcome", ylab="Hat value")
+  
+```
+
+Outliers: None
+
+## SubGroup/Moderator models
+
+Useful for interpretation: https://www.metafor-project.org/doku.php/tips:meta_regression_with_log_rr
+
+**multi-factor model**
+
+```{r}
+
+Location_basemod_GPLs_Full = rma.mv(yi=yi, V=vi,data = Location_RR_data_GPLs, random = ~1|Short.Citation,mods = ~ host.adult.ecology  + life.stage.exp, slab = Location_RR_data_GPLs$Study.Name, method = "REML")
+
+summary(Location_basemod_GPLs_Full)
+
+```
+
+**model comparison of GPL-GPL only data**
+
+```{r}
+Location_basemod_GPLs_ML = rma.mv(yi=yi, V=vi,data = Location_RR_data_GPLs, random = ~1|Short.Citation,slab = Location_RR_data_GPLs$Study.Name, method = "ML")
+
+Location_basemod_GPLs_Full_ML = rma.mv(yi=yi, V=vi,data = Location_RR_data_GPLs, random = ~1|Short.Citation,mods = ~ host.adult.ecology  + life.stage.exp, slab = Location_RR_data_GPLs$Study.Name, method = "ML")
+
+anova(Location_basemod_GPLs_ML,Location_basemod_GPLs_Full_ML)
+```
+
+**Conclusion** Full model is "NOT better" than intercept only model 
+*random study term included in both*
+
+
+**single factor models**
+
+*maybe exclude because the full model isn't better than base model*
+
+**Host Ecology**
+
+Conclusion: Not Significant
+
+```{r}
+
+Location_basemod_noOL_HEco = rma.mv(yi=yi, V=vi,data = Location_RR_data_GPLs, random = ~1|Shortcitation, mods = ~ host.adult.ecology, slab = Location_RR_data_GPLs$Study.Name, method = "REML")
+
+## model results
+summary(Location_basemod_noOL_HEco)
+
+```
+
+**Life Stage**
+
+Conclusion: Not Significant
+
+```{r}
+
+Location_basemod_noOL_LS = rma.mv(yi=yi, V=vi,data = Location_RR_data_GPLs, random = ~1|Shortcitation, mods = ~ + life.stage.exp,slab = Location_RR_data_GPLs$Study.Name, method = "REML")
+
+## model results
+summary(Location_basemod_noOL_LS)
+
+```
